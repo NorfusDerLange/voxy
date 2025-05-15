@@ -56,13 +56,15 @@ public class ChunkBoundRenderer {
     }
 
     public void addSection(long pos) {
-        this.addQueue.add(pos);
-        this.remQueue.remove(pos);
+        if (!this.remQueue.remove(pos)) {
+            this.addQueue.add(pos);
+        }
     }
 
     public void removeSection(long pos) {
-        this.remQueue.add(pos);
-        this.addQueue.remove(pos);
+        if (!this.addQueue.remove(pos)) {
+            this.remQueue.add(pos);
+        }
     }
 
     //Bind and render, changing as little gl state as possible so that the caller may configure how it wants to render
@@ -148,6 +150,7 @@ public class ChunkBoundRenderer {
         if (!this.addQueue.isEmpty()) {
             this.addQueue.forEach(this::_addPos);
             this.addQueue.clear();
+            UploadStream.INSTANCE.commit();
         }
     }
 
@@ -192,6 +195,9 @@ public class ChunkBoundRenderer {
 
     private void ensureSize1() {
         if (this.chunk2idx.size() < this.idx2chunk.length) return;
+        //Commit any copies, ensures is synced to new buffer
+        UploadStream.INSTANCE.commit();
+
         int size = (int) (this.idx2chunk.length*1.5);
         Logger.info("Resizing chunk position buffer to: " + size);
         //Need to resize
@@ -211,7 +217,6 @@ public class ChunkBoundRenderer {
         //Need to do it in 2 parts because ivec2 is 2 parts
         MemoryUtil.memPutInt(ptr2, (int)(pos&0xFFFFFFFFL)); ptr2 += 4;
         MemoryUtil.memPutInt(ptr2, (int)((pos>>>32)&0xFFFFFFFFL));
-        UploadStream.INSTANCE.commit();
     }
 
     public void reset() {

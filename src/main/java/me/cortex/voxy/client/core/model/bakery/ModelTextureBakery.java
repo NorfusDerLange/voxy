@@ -21,8 +21,7 @@ import net.minecraft.world.chunk.light.LightingProvider;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 
-import static org.lwjgl.opengl.ARBShaderImageLoadStore.GL_FRAMEBUFFER_BARRIER_BIT;
-import static org.lwjgl.opengl.ARBShaderImageLoadStore.glMemoryBarrier;
+import static org.lwjgl.opengl.ARBShaderImageLoadStore.*;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14C.glBlendFuncSeparate;
 import static org.lwjgl.opengl.GL30.*;
@@ -43,15 +42,28 @@ public class ModelTextureBakery {
         this.height = height;
     }
 
+    public static int getMetaFromLayer(RenderLayer layer) {
+        boolean hasDiscard = layer == RenderLayer.getCutout() ||
+                layer == RenderLayer.getCutoutMipped() ||
+                layer == RenderLayer.getTripwire();
+
+        boolean isMipped = layer == RenderLayer.getCutoutMipped() ||
+                layer == RenderLayer.getSolid() ||
+                layer == RenderLayer.getTranslucent() ||
+                layer == RenderLayer.getTripwire();
+
+        int meta = hasDiscard?1:0;
+        meta |= isMipped?2:0;
+        return meta;
+    }
+
     private void bakeBlockModel(BlockState state, RenderLayer layer) {
         var model = MinecraftClient.getInstance()
                 .getBakedModelManager()
                 .getBlockModels()
                 .getModel(state);
 
-        boolean hasDiscard = layer == RenderLayer.getCutout() ||
-                layer == RenderLayer.getCutoutMipped() ||
-                layer == RenderLayer.getTripwire();
+        int meta = getMetaFromLayer(layer);
 
         for (Direction direction : new Direction[]{Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, null}) {
             for (var part : model.getParts(new LocalRandom(42L))) {
@@ -59,7 +71,6 @@ public class ModelTextureBakery {
                 for (var quad : quads) {
                     //TODO: add meta specifiying quad has a tint
 
-                    int meta = hasDiscard?1:0;
                     this.vc.quad(quad, meta);
                 }
             }
@@ -67,7 +78,8 @@ public class ModelTextureBakery {
     }
 
 
-    private void bakeFluidState(BlockState state, int face) {
+    private void bakeFluidState(BlockState state, RenderLayer layer, int face) {
+        this.vc.setDefaultMeta(getMetaFromLayer(layer));//Set the meta while baking
         MinecraftClient.getInstance().getBlockRenderManager().renderFluid(BlockPos.ORIGIN, new BlockRenderView() {
             @Override
             public float getBrightness(Direction direction, boolean shaded) {
@@ -132,6 +144,7 @@ public class ModelTextureBakery {
                 return 0;
             }
         }, this.vc, state, state.getFluidState());
+        this.vc.setDefaultMeta(0);//Reset default meta
     }
 
     private static boolean shouldReturnAirForFluid(BlockPos pos, int face) {
@@ -221,7 +234,7 @@ public class ModelTextureBakery {
             var mat = new Matrix4f();
             for (int i = 0; i < VIEWS.length; i++) {
                 this.vc.reset();
-                this.bakeFluidState(state, i);
+                this.bakeFluidState(state, layer, i);
                 if (this.vc.isEmpty()) continue;
                 BudgetBufferRenderer.setup(this.vc.getAddress(), this.vc.quadCount(), blockTextureId);
 
@@ -268,7 +281,7 @@ public class ModelTextureBakery {
         glDisable(GL_BLEND);
 
         //Finish and download
-        glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+        glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT|GL_TEXTURE_UPDATE_BARRIER_BIT|GL_PIXEL_BUFFER_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);//Am not sure if barriers are right
         this.capture.emitToStream(streamBuffer, streamOffset);
 
         glBindFramebuffer(GL_FRAMEBUFFER, this.capture.framebuffer.id);

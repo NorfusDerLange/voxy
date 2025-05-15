@@ -212,7 +212,7 @@ public class ServiceThreadPool {
                     logIO[0] = 0;
                 }
                 try {
-                    Thread.sleep((long) (300*Math.random()+5));
+                    Thread.sleep((long) (500*Math.random()+200));
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
@@ -254,6 +254,9 @@ public class ServiceThreadPool {
             if (this.totalJobWeight.addAndGet(-service.weightPerJob)<0) {
                 throw new IllegalStateException("Total job weight is negative");
             }
+
+            //Sleep for a bit after running a job, yeild the thread
+            Thread.yield();
             break;
         }
     }

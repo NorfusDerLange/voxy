@@ -96,8 +96,8 @@ public class TextureUtils {
 
         //Shouldent be needed due to the compute bake copy
         depthF *= 2;
-        if (depthF > 1.00001f) {
-            System.err.println("Warning: Depth greater than 1");
+        if (depthF > 1.00001f) {//Basicly only happens when a model goes out of bounds (thing)
+            //System.err.println("Warning: Depth greater than 1");
             depthF = 1.0f;
         }
         return depthF;
@@ -194,9 +194,9 @@ public class TextureUtils {
 
         if (((a^b)&0xFF000000)==0) {
             return ColorSRGB.linearToSrgb(
-                    addHalfLinear(16, a,b),
-                    addHalfLinear(8, a,b),
                     addHalfLinear(0, a,b),
+                    addHalfLinear(8, a,b),
+                    addHalfLinear(16, a,b),
                     a>>>24);
         }
 
@@ -207,9 +207,9 @@ public class TextureUtils {
             float wA = A * mul;
             float wB = B * mul;
             return ColorSRGB.linearToSrgb(
-                    addMulLinear(16, a,b,wA,wB),
+                    addMulLinear(0, a,b,wA,wB),
                     addMulLinear(8, a,b,wA,wB),
-                    addMulLinear(0, a,b,wA,wB)
+                    addMulLinear(16, a,b,wA,wB)
                     , (A + B)/2);
         }
     }
