@@ -21,6 +21,7 @@ import static org.lwjgl.opengl.GL42C.GL_BUFFER_UPDATE_BARRIER_BIT;
 import static org.lwjgl.opengl.GL43.GL_SHADER_STORAGE_BARRIER_BIT;
 import static org.lwjgl.opengl.GL44.GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT;
 import static org.lwjgl.opengl.GL44.GL_MAP_COHERENT_BIT;
+import static org.lwjgl.opengl.GL45C.glFlushMappedNamedBufferRange;
 
 public class UploadStream {
     private final AllocationArena allocationArena = new AllocationArena();
@@ -30,8 +31,10 @@ public class UploadStream {
     private final LongArrayList thisFrameAllocations = new LongArrayList();
     private final Deque<UploadData> uploadList = new ArrayDeque<>();
 
+    private static final boolean USE_COHERENT = false;
+
     public UploadStream(long size) {
-        this.uploadBuffer = new GlPersistentMappedBuffer(size,GL_MAP_WRITE_BIT|GL_MAP_UNSYNCHRONIZED_BIT|GL_MAP_COHERENT_BIT).name("UploadStream");
+        this.uploadBuffer = new GlPersistentMappedBuffer(size,GL_MAP_WRITE_BIT|GL_MAP_UNSYNCHRONIZED_BIT|(USE_COHERENT?GL_MAP_COHERENT_BIT:GL_MAP_FLUSH_EXPLICIT_BIT)).name("UploadStream");
         this.allocationArena.setLimit(size);
     }
 
@@ -61,9 +64,15 @@ public class UploadStream {
         if (size > this.uploadBuffer.size()) {
             throw new IllegalArgumentException();
         }
+        //Force natural size alignment, this should ensure that _all_ allocations are aligned to this size, note, this only effects the allocation block
+        // not how much data is moved or copied
+        size = (size+15)&~15;//Alignment to 16 bytes
 
         long addr;
         if (this.caddr == -1 || !this.allocationArena.expand(this.caddr, (int) size)) {
+            if ((!USE_COHERENT)&&this.caddr!=-1) {
+                glFlushMappedNamedBufferRange(this.uploadBuffer.id, this.caddr, this.offset);
+            }
             this.caddr = this.allocationArena.alloc((int) size);//TODO: replace with allocFromLargest
             if (this.caddr == SIZE_LIMIT) {
                 //Note! we dont commit here, we only try to flush existing memory copies, we dont commit
@@ -99,7 +108,12 @@ public class UploadStream {
         if (this.uploadList.isEmpty()) {
             return;
         }
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT|GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT|GL_BUFFER_UPDATE_BARRIER_BIT);
+        if ((!USE_COHERENT)&&this.caddr != -1) {
+            //Flush this allocation
+            glFlushMappedNamedBufferRange(this.uploadBuffer.id, this.caddr, this.offset);
+        }
+
+        glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
         //Execute all the copies
         for (var entry : this.uploadList) {
             glCopyNamedBufferSubData(this.uploadBuffer.id, entry.target.id, entry.uploadOffset, entry.targetOffset, entry.size);
