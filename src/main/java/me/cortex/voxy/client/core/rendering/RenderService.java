@@ -75,21 +75,18 @@ public class RenderService<T extends AbstractSectionRenderer<J, Q>, J extends Vi
         Logger.info("Using renderer: " + this.sectionRenderer.getClass().getSimpleName() + " with geometry buffer of: " + geometryCapacity + " bytes");
 
         //Do something incredibly hacky, we dont need to keep the reference to this around, so just connect and discard
-        var router = new SectionUpdateRouter();
-
-        this.nodeManager = new AsyncNodeManager(1<<21, router, this.geometryData);
-        this.nodeCleaner = new NodeCleaner(this.nodeManager);
 
         this.viewportSelector = new ViewportSelector<>(this.sectionRenderer::createViewport);
         this.renderGen = new RenderGenerationService(world, this.modelService, serviceThreadPool,
-                this.nodeManager::submitGeometryResult, this.sectionRenderer.getGeometryManager() instanceof IUsesMeshlets,
+                this.sectionRenderer.getGeometryManager() instanceof IUsesMeshlets,
                 ()->true);
 
-        router.setCallbacks(this.renderGen::enqueueTask, this.nodeManager::submitChildChange);
+        this.nodeManager = new AsyncNodeManager(1<<21, this.geometryData, this.renderGen);
+        this.nodeCleaner = new NodeCleaner(this.nodeManager);
 
         this.traversal = new HierarchicalOcclusionTraverser(this.nodeManager, this.nodeCleaner);
 
-        world.setDirtyCallback(router::forwardEvent);
+        world.setDirtyCallback(this.nodeManager::worldEvent);
 
         Arrays.stream(world.getMapper().getBiomeEntries()).forEach(this.modelService::addBiome);
         world.getMapper().setBiomeCallback(this.modelService::addBiome);
@@ -160,10 +157,10 @@ public class RenderService<T extends AbstractSectionRenderer<J, Q>, J extends Vi
 
             glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT | GL_PIXEL_BUFFER_BARRIER_BIT);
 
-            int depthBuffer = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
-            if (depthBuffer == 0) {
-                depthBuffer = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
-            }
+            int depthBuffer = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+            //if (depthBuffer == 0) {
+            //    depthBuffer = glGetFramebufferAttachmentParameteri(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+            //}
 
             TimingStatistics.I.start();
             this.traversal.doTraversal(viewport, depthBuffer);
@@ -184,7 +181,7 @@ public class RenderService<T extends AbstractSectionRenderer<J, Q>, J extends Vi
         TimingStatistics.H.stop();
 
         TimingStatistics.G.start();
-        this.sectionRenderer.renderTemporal(depthBoundTexture);
+        this.sectionRenderer.renderTemporal(viewport, depthBoundTexture);
         TimingStatistics.G.stop();
     }
 
