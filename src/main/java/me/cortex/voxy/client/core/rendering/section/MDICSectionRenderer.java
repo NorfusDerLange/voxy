@@ -2,6 +2,7 @@ package me.cortex.voxy.client.core.rendering.section;
 
 
 import me.cortex.voxy.client.RenderStatistics;
+import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.gl.GlTexture;
 import me.cortex.voxy.client.core.gl.shader.Shader;
@@ -34,6 +35,7 @@ import static org.lwjgl.opengl.GL42.glMemoryBarrier;
 import static org.lwjgl.opengl.GL43.*;
 import static org.lwjgl.opengl.GL45.glBindTextureUnit;
 import static org.lwjgl.opengl.GL45.glClearNamedBufferData;
+import static org.lwjgl.opengl.NVRepresentativeFragmentTest.GL_REPRESENTATIVE_FRAGMENT_TEST_NV;
 
 //Uses MDIC to render the sections
 public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, BasicSectionGeometryData> {
@@ -136,6 +138,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         this.bindRenderingBuffers(viewport, depthBoundTexture);
 
         glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);//Barrier everything is needed
+        glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
         glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, indirectOffset, drawCountOffset, maxDrawCount, 0);
 
         glEnable(GL_CULL_FACE);
@@ -169,6 +172,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glBindVertexArray(RenderService.STATIC_VAO);//Needs to be before binding
         this.bindRenderingBuffers(viewport, depthBoundTexture);
 
+        glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
         glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, TRANSLUCENT_OFFSET*5*4, 4*4, Math.min(this.geometryManager.getSectionCount(), 100_000), 0);
 
         glEnable(GL_CULL_FACE);
@@ -201,6 +205,9 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
         {//Test occlusion
             this.cullShader.bind();
+            if (Capabilities.INSTANCE.repFragTest) {
+                glEnable(GL_REPRESENTATIVE_FRAGMENT_TEST_NV);
+            }
             glBindVertexArray(RenderService.STATIC_VAO);
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, this.uniform.id);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, this.geometryManager.getMetadataBuffer().id);
@@ -216,6 +223,9 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             glDepthMask(true);
             glColorMask(true, true, true, true);
             glDisable(GL_DEPTH_TEST);
+            if (Capabilities.INSTANCE.repFragTest) {
+                glDisable(GL_REPRESENTATIVE_FRAGMENT_TEST_NV);
+            }
         }
 
 
