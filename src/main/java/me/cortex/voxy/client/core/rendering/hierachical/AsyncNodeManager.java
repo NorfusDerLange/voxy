@@ -245,9 +245,7 @@ public class AsyncNodeManager {
 
         //Limit uploading as well as by geometry capacity being available
         // must have 50 mb of free geometry space to upload
-        boolean hasGeometryCapacity = true;
-        for (int limit = 0; limit < 200 && (hasGeometryCapacity=(this.geometryCapacity-this.geometryManager.getGeometryUsedBytes())>50_000_000); limit++)
-        {
+        for (int limit = 0; limit < 200 && ((this.geometryCapacity-this.geometryManager.getGeometryUsedBytes())>50_000_000); limit++) {
             var job = this.geometryUpdateQueue.poll();
             if (job == null)
                 break;
@@ -281,6 +279,7 @@ public class AsyncNodeManager {
                 break;
             workDone++;
             long ptr = job.address;
+            int zeroCount = 0;
             for (int i = 0; i < NodeCleaner.OUTPUT_COUNT; i++) {
                 long pos = ((long) MemoryUtil.memGetInt(ptr)) << 32; ptr += 4;
                 pos |= Integer.toUnsignedLong(MemoryUtil.memGetInt(ptr)); ptr += 4;
@@ -290,9 +289,8 @@ public class AsyncNodeManager {
                     continue;
                 }
 
-                if (pos == 0) {
-                    //THIS SHOULD BE IMPOSSIBLE
-                    //TODO: VVVVV MUCH MEGA FIX
+                if (pos == 0 && zeroCount++>0) {
+                    Logger.error("Remove node pos is 0 " + zeroCount + " times, this is really bad, please report" );
                     continue;
                 }
 
@@ -315,11 +313,7 @@ public class AsyncNodeManager {
         }
 
         if (workDone == 0) {//Nothing happened, which is odd, but just return
-            //we need to do an unsafe hack here
-            if (!hasGeometryCapacity) {
-                this.usedGeometryAmount = this.geometryManager.getGeometryUsedBytes();
-                VarHandle.fullFence();
-            }
+            //Should probably log that nothing happened, at least once
             return;
         }
         //=====================
