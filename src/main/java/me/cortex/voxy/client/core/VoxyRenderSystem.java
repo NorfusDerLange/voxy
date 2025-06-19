@@ -2,19 +2,15 @@ package me.cortex.voxy.client.core;
 
 import com.mojang.blaze3d.opengl.GlConst;
 import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.systems.RenderSystem;
 import me.cortex.voxy.client.TimingStatistics;
 import me.cortex.voxy.client.VoxyClient;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.gl.GlTexture;
-import me.cortex.voxy.client.core.model.ModelBakerySubsystem;
 import me.cortex.voxy.client.core.rendering.ChunkBoundRenderer;
 import me.cortex.voxy.client.core.rendering.RenderDistanceTracker;
 import me.cortex.voxy.client.core.rendering.RenderService;
-import me.cortex.voxy.client.core.rendering.building.RenderDataFactory;
-import me.cortex.voxy.client.core.rendering.building.RenderGenerationService;
 import me.cortex.voxy.client.core.rendering.post.PostProcessing;
 import me.cortex.voxy.client.core.rendering.util.DownloadStream;
 import me.cortex.voxy.client.core.rendering.util.PrintfDebugUtil;
@@ -24,31 +20,19 @@ import me.cortex.voxy.client.core.util.IrisUtil;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.thread.ServiceThreadPool;
 import me.cortex.voxy.common.world.WorldEngine;
-import me.cortex.voxy.common.world.WorldSection;
-import me.cortex.voxy.common.world.other.Mapper;
-import me.cortex.voxy.commonImpl.VoxyCommon;
 import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
-import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.GlBackend;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.Frustum;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.lwjgl.opengl.GL11;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.lwjgl.opengl.GL11.GL_ONE;
-import static org.lwjgl.opengl.GL11.GL_ONE_MINUS_SRC_ALPHA;
-import static org.lwjgl.opengl.GL11.GL_SRC_ALPHA;
 import static org.lwjgl.opengl.GL11.GL_VIEWPORT;
 import static org.lwjgl.opengl.GL11.glGetIntegerv;
-import static org.lwjgl.opengl.GL11C.*;
-import static org.lwjgl.opengl.GL14.glBlendFuncSeparate;
+import static org.lwjgl.opengl.GL11C.glFinish;
 import static org.lwjgl.opengl.GL30C.GL_DRAW_FRAMEBUFFER_BINDING;
 import static org.lwjgl.opengl.GL30C.glBindFramebuffer;
 import static org.lwjgl.opengl.GL33.glBindSampler;
@@ -64,75 +48,46 @@ public class VoxyRenderSystem {
         //Keep the world loaded, NOTE: this is done FIRST, to keep and ensure that even if the rest of loading takes more
         // than timeout, we keep the world acquired
         world.acquireRef();
+        try {
+            //wait for opengl to be finished, this should hopefully ensure all memory allocations are free
+            glFinish();
+            glFinish();
 
-        //wait for opengl to be finished, this should hopefully ensure all memory allocations are free
-        glFinish();glFinish();
+            //Trigger the shared index buffer loading
+            SharedIndexBuffer.INSTANCE.id();
+            Capabilities.init();//Ensure clinit is called
 
-        //Trigger the shared index buffer loading
-        SharedIndexBuffer.INSTANCE.id();
-        Capabilities.init();//Ensure clinit is called
+            this.worldIn = world;
+            this.renderer = new RenderService(world, threadPool);
+            this.postProcessing = new PostProcessing();
+            int minSec = MinecraftClient.getInstance().world.getBottomSectionCoord() >> 5;
+            int maxSec = (MinecraftClient.getInstance().world.getTopSectionCoord() - 1) >> 5;
 
-        this.worldIn = world;
-        this.renderer = new RenderService(world, threadPool);
-        this.postProcessing = new PostProcessing();
-        int minSec = MinecraftClient.getInstance().world.getBottomSectionCoord()>>5;
-        int maxSec = (MinecraftClient.getInstance().world.getTopSectionCoord()-1)>>5;
+            //Do some very cheeky stuff for MiB
+            if (false) {
+                minSec = -8;
+                maxSec = 7;
+            }
 
-        //Do some very cheeky stuff for MiB
-        if (false) {
-            minSec = -8;
-            maxSec = 7;
+            this.renderDistanceTracker = new RenderDistanceTracker(20,
+                    minSec,
+                    maxSec,
+                    this.renderer::addTopLevelNode,
+                    this.renderer::removeTopLevelNode);
+
+            this.renderDistanceTracker.setRenderDistance(VoxyConfig.CONFIG.sectionRenderDistance);
+
+            this.chunkBoundRenderer = new ChunkBoundRenderer();
+        } catch (RuntimeException e) {
+            world.releaseRef();//If something goes wrong, we must release the world first
+            throw e;
         }
-
-        this.renderDistanceTracker = new RenderDistanceTracker(20,
-                minSec,
-                maxSec,
-                this.renderer::addTopLevelNode,
-                this.renderer::removeTopLevelNode);
-
-        this.renderDistanceTracker.setRenderDistance(VoxyConfig.CONFIG.sectionRenderDistance);
-
-        this.chunkBoundRenderer = new ChunkBoundRenderer();
     }
 
     public void setRenderDistance(int renderDistance) {
         this.renderDistanceTracker.setRenderDistance(renderDistance);
     }
 
-
-    //private static final ModelTextureBakery mtb = new ModelTextureBakery(16, 16);
-    //private static final RawDownloadStream downstream = new RawDownloadStream(1<<20);
-    public void renderSetup(Frustum frustum, Camera camera) {
-        TimingStatistics.resetSamplers();
-
-        /*
-        if (false) {
-            int allocation = downstream.download(2 * 4 * 6 * 16 * 16, ptr -> {
-                ColourDepthTextureData[] textureData = new ColourDepthTextureData[6];
-                final int FACE_SIZE = 16 * 16;
-                for (int face = 0; face < 6; face++) {
-                    long faceDataPtr = ptr + (FACE_SIZE * 4) * face * 2;
-                    int[] colour = new int[FACE_SIZE];
-                    int[] depth = new int[FACE_SIZE];
-
-                    //Copy out colour
-                    for (int i = 0; i < FACE_SIZE; i++) {
-                        //De-interpolate results
-                        colour[i] = MemoryUtil.memGetInt(faceDataPtr + (i * 4 * 2));
-                        depth[i] = MemoryUtil.memGetInt(faceDataPtr + (i * 4 * 2) + 4);
-                    }
-
-                    textureData[face] = new ColourDepthTextureData(colour, depth, 16, 16);
-                }
-                if (textureData[0].colour()[0] == 0) {
-                    int a = 0;
-                }
-            });
-            mtb.renderFacesToStream(Blocks.AIR.getDefaultState(), 123456, false, downstream.getBufferId(), allocation);
-            downstream.submit();
-            downstream.tick();
-        }*/
-    }
 
     private void autoBalanceSubDivSize() {
         //only increase quality while there are very few mesh queues, this stops,
@@ -176,6 +131,9 @@ public class VoxyRenderSystem {
         if (IrisUtil.irisShadowActive()) {
             return;
         }
+        TimingStatistics.resetSamplers();
+
+
         //Do some very cheeky stuff for MiB
         if (false) {
             int sector = (((int)Math.floor(cameraX)>>4)+512)>>10;
