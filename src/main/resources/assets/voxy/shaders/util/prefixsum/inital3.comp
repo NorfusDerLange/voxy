@@ -92,12 +92,27 @@ void main() {
         memoryBarrierShared();
         barrier();
 
+
+        #ifdef IS_WINDOWS
+        //hate amd hate amd hate amd hate amd
+        uint val = warpPrefixSum[gl_LocalInvocationID.x&3u];
+
+        subgroupBarrier();
+        //Use warp to do entire add in 1 reduction
+        uint extraJank = subgroupExclusiveAdd(val);
+
+        barrier();
+        if (gl_LocalInvocationID.x<4) {
+            warpPrefixSum[gl_LocalInvocationID.x] = extraJank;
+        }
+        #else
         if (gl_LocalInvocationID.x<4) {
             uint val = warpPrefixSum[gl_SubgroupInvocationID];
             subgroupBarrier();
             //Use warp to do entire add in 1 reduction
             warpPrefixSum[gl_SubgroupInvocationID] = subgroupExclusiveAdd(val);
         }
+        #endif
 
         memoryBarrierShared();
         barrier();
