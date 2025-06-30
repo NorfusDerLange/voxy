@@ -7,6 +7,8 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 
+import java.lang.invoke.VarHandle;
+
 public class VoxyCommon implements ModInitializer {
     public static final String MOD_VERSION;
     public static final boolean IS_DEDICATED_SERVER;
@@ -31,7 +33,11 @@ public class VoxyCommon implements ModInitializer {
 
     //This is hardcoded like this because people do not understand what they are doing
     public static boolean isVerificationFlagOn(String name) {
-        return System.getProperty("voxy."+name, "false").equals("true");
+        return isVerificationFlagOn(name, false);
+    }
+
+    public static boolean isVerificationFlagOn(String name, boolean defaultOn) {
+        return System.getProperty("voxy."+name, defaultOn?"true":"false").equals("true");
     }
 
     public static void breakpoint() {
@@ -60,8 +66,9 @@ public class VoxyCommon implements ModInitializer {
 
     public static void shutdownInstance() {
         if (INSTANCE != null) {
-            INSTANCE.shutdown();
-            INSTANCE = null;
+            var instance = INSTANCE;
+            INSTANCE = null;//Make it null before shutdown
+            instance.shutdown();
         }
     }
 
